@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111">
+<title>Semáforo de Viajes</title>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;overflow:hidden}
+#camera{position:fixed;inset:0;width:100%;height:100%;object-fit:cover}
+#shade{position:fixed;inset:0;background:rgba(0,0,0,.18);pointer-events:none}
+#scan{position:fixed;left:5%;right:5%;top:22%;height:42%;border:3px solid rgba(255,255,255,.8);border-radius:20px;box-shadow:0 0 0 9999px rgba(0,0,0,.18);pointer-events:none}
+#result{position:fixed;left:7%;right:7%;bottom:5%;height:25%;border-radius:28px;display:flex;align-items:center;justify-content:center;font-size:110px;background:#222}
+#status{position:fixed;top:7%;left:8%;right:8%;text-align:center;background:rgba(0,0,0,.65);padding:9px 12px;border-radius:16px;font-size:14px}
+</style>
+</head>
+<body>
+<video id="camera" autoplay playsinline muted></video><div id="shade"></div><div id="scan"></div>
+<div id="status">Iniciando cámara…</div><div id="result">—</div>
+<script>
+const table=[
+[5,[[25,2],[21,2],[18,2],[17,1]]],[10,[[50,4],[42,4],[36,4],[34,3]]],
+[15,[[75,6],[63,6],[54,6],[50,5]]],[20,[[100,9],[84,8],[72,8],[67,7]]],
+[25,[[125,11],[105,10],[90,10],[84,9]]],[30,[[150,13],[125,12],[108,12],[100,11]]],
+[35,[[175,15],[146,14],[126,14],[117,13]]],[40,[[200,18],[167,16],[144,16],[134,14]]],
+[45,[[225,20],[188,18],[162,18],[150,16]]],[50,[[250,22],[209,20],[180,20],[167,18]]],
+[55,[[275,25],[230,23],[198,22],[184,20]]],[60,[[300,27],[250,25],[215,23],[200,22]]]
+];
+const video=document.getElementById('camera'), result=document.getElementById('result'), status=document.getElementById('status');
+let busy=false,lastScan=0;
+async function start(){
+ try{
+  const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:720}},audio:false});
+  video.srcObject=stream; status.textContent="Apunta al recuadro de la oferta";
+  setTimeout(scan,1200);
+ }catch(e){status.textContent="Permite el acceso a la cámara en Safari";}
+}
+function decide(pay, mins, km){
+ const row=table.find(x=>mins<=x[0]); if(!row)return ["🔴","#d92d20"];
+ for(let i=0;i<4;i++){
+  if(pay>=row[1][i][0] && km<=row[1][i][1]){
+   return [i<2?"🟢":i===2?"🟡":"🟠",i<2?"#12b76a":i===2?"#f2c94c":"#f2994a"];
+  }
+ }
+ return ["🔴","#d92d20"];
+}
+function parse(text){
+ const t=text.replace(/\u00a0/g," ").replace(/,/g,"").replace(/—|–/g,"-");
+ const money=t.match(/\$\s*([0-9]+(?:\.[0-9]{1,2})?)/);
+ if(!money)return null;
+ const re=/(\d{1,3})\s*min(?:\s*\(\s*)?\s*([0-9]+(?:\.[0-9]+)?)\s*(km|m)/gi;
+ let m, pairs=[];
+ while((m=re.exec(t))!==null){pairs.push([parseInt(m[1]),m[3].toLowerCase()==="m"?parseFloat(m[2])/1000:parseFloat(m[2])]);}
+ if(pairs.length<2)return null;
+ return {pay:parseFloat(money[1]),mins:pairs[0][0]+pairs[1][0],km:pairs[0][1]+pairs[1][1]};
+}
+async function scan(){
+ if(busy || !video.videoWidth){setTimeout(scan,500);return}
+ if(Date.now()-lastScan<1400){setTimeout(scan,400);return}
+ busy=true;lastScan=Date.now();
+ try{
+  const c=document.createElement("canvas"), w=video.videoWidth, h=video.videoHeight;
+  c.width=Math.floor(w*.9);c.height=Math.floor(h*.55);
+  const ctx=c.getContext("2d");
+  ctx.drawImage(video,w*.05,h*.22,w*.9,h*.55,0,0,c.width,c.height);
+  const {data:{text}}=await Tesseract.recognize(c,"eng",{logger:()=>{}});
+  const v=parse(text);
+  if(v){
+   const [emoji,bg]=decide(v.pay,v.mins,v.km);result.textContent=emoji;result.style.background=bg;
+   status.textContent=`${v.pay.toFixed(2)} · ${v.mins} min · ${v.km.toFixed(2)} km`;
+  }else status.textContent="Buscando pago, minutos y km…";
+ }catch(e){status.textContent="Procesando…";}
+ busy=false;setTimeout(scan,250);
+}
+start();
+</script>
+</body>
+</html>
